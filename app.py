@@ -40,9 +40,6 @@ def init_earring_embeddings(_model, _processor, _device, earrings_df):
 model, processor, device = init_model()
 necklaces, earrings = init_dataset()
 
-if necklaces.empty:
-    st.error("No necklace images found. Check the images/ folder and CSV.")
-    st.stop()
 if earrings.empty:
     st.error("No earring images found. Check the images/ folder and CSV.")
     st.stop()
@@ -50,37 +47,54 @@ if earrings.empty:
 earring_embeddings, earring_ids = init_earring_embeddings(model, processor, device, earrings)
 
 
-# ── sidebar: select a necklace ───────────────────────────────────
-st.sidebar.header("Select a Necklace")
+# ── sidebar: choose input method ─────────────────────────────────
+st.sidebar.header("Choose a Necklace")
 
-necklace_options = {row["id"]: row["image_file"] for _, row in necklaces.iterrows()}
-selected_id = st.sidebar.selectbox("Necklace", list(necklace_options.keys()))
+input_method = st.sidebar.radio("Input method", ["Select from inventory", "Upload an image"])
 
-necklace_img_path = os.path.join(IMAGE_DIR, necklace_options[selected_id])
-necklace_img = Image.open(necklace_img_path).convert("RGB")
+necklace_img = None
+necklace_label = None
 
-st.sidebar.image(necklace_img, caption=selected_id, use_container_width=True)
+if input_method == "Select from inventory":
+    if necklaces.empty:
+        st.sidebar.warning("No necklace images found in inventory.")
+    else:
+        necklace_options = {row["id"]: row["image_file"] for _, row in necklaces.iterrows()}
+        selected_id = st.sidebar.selectbox("Necklace", list(necklace_options.keys()))
+        necklace_img_path = os.path.join(IMAGE_DIR, necklace_options[selected_id])
+        necklace_img = Image.open(necklace_img_path).convert("RGB")
+        necklace_label = selected_id
+        st.sidebar.image(necklace_img, caption=selected_id, use_container_width=True)
+else:
+    uploaded_file = st.sidebar.file_uploader("Upload a necklace image", type=["jpg", "jpeg", "png", "webp"])
+    if uploaded_file is not None:
+        necklace_img = Image.open(uploaded_file).convert("RGB")
+        necklace_label = uploaded_file.name
+        st.sidebar.image(necklace_img, caption="Uploaded image", use_container_width=True)
 
 top_k = st.sidebar.slider("Number of recommendations", min_value=1, max_value=10, value=3)
 
 
 # ── run matching ─────────────────────────────────────────────────
 if st.sidebar.button("Find Matching Earrings", type="primary"):
-    with st.spinner("Computing similarity..."):
-        necklace_emb = get_image_embedding(necklace_img, model, processor, device)
-        results = find_matching_earrings(necklace_emb, earring_embeddings, earring_ids, top_k)
+    if necklace_img is None:
+        st.warning("Please select or upload a necklace image first.")
+    else:
+        with st.spinner("Computing similarity..."):
+            necklace_emb = get_image_embedding(necklace_img, model, processor, device)
+            results = find_matching_earrings(necklace_emb, earring_embeddings, earring_ids, top_k)
 
-    st.subheader(f"Top {len(results)} Matching Earrings for {selected_id}")
+        st.subheader(f"Top {len(results)} Matching Earrings for {necklace_label}")
 
-    cols = st.columns(min(len(results), 5))
-    for idx, (eid, score) in enumerate(results):
-        col = cols[idx % len(cols)]
-        ear_row = earrings[earrings["id"] == eid].iloc[0]
-        ear_img_path = os.path.join(IMAGE_DIR, ear_row["image_file"])
-        ear_img = Image.open(ear_img_path).convert("RGB")
-        with col:
-            st.image(ear_img, use_container_width=True)
-            st.markdown(f"**{eid}**")
-            st.caption(f"Similarity: {score:.4f}")
+        cols = st.columns(min(len(results), 5))
+        for idx, (eid, score) in enumerate(results):
+            col = cols[idx % len(cols)]
+            ear_row = earrings[earrings["id"] == eid].iloc[0]
+            ear_img_path = os.path.join(IMAGE_DIR, ear_row["image_file"])
+            ear_img = Image.open(ear_img_path).convert("RGB")
+            with col:
+                st.image(ear_img, use_container_width=True)
+                st.markdown(f"**{eid}**")
+                st.caption(f"Similarity: {score:.4f}")
 else:
-    st.info("Select a necklace from the sidebar and click **Find Matching Earrings**.")
+    st.info("Select or upload a necklace image from the sidebar and click **Find Matching Earrings**.")
